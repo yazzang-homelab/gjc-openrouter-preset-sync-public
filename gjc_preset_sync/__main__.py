@@ -8,7 +8,8 @@ import sys
 
 from .core import (SyncError, atomic_write, build_profile, decode_yaml, get_dataset,
                    initial_policy, json_bytes, mutate, normalize_spend, normalize_tasks,
-                   private_dir, read_bytes, read_json, validate_policy)
+                   private_dir, read_bytes, read_json, validate_policy, check_profile_quality)
+from . import quality
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -25,8 +26,30 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--catalog-file", type=Path, help="Required together with --tasks-file")
     parser.add_argument("--spend-snapshot", action="store_true", help="Explicit operator-verified spend import, not live API")
     parser.add_argument("--allow-snapshot-apply", action="store_true", help="Extra gate for applying offline/imported data")
+    parser.add_argument("--bootstrap", action="store_true", help="Explicitly establish a new quality baseline; still requires all confirmations")
+    parser.add_argument("--evidence-dir", type=Path, help="Private confirmation evidence directory; never executes evaluations")
     args = parser.parse_args(argv)
     try:
+        def evidence_snapshot():
+            directory = args.evidence_dir or args.state_dir / "evaluation-state/evidence"
+            if directory.is_symlink():
+                raise SyncError("Evidence directory cannot be a symlink")
+            paths = sorted(directory.glob("*.json")) if directory.exists() else []
+            if len(paths) > 4096:
+                raise SyncError("Evidence collection exceeds its read bound")
+            rows = [read_json(path) for path in paths]
+            return rows, [(str(path), hashlib.sha256(read_bytes(path)).hexdigest()) for path in paths]
+
+        def guard_for(policy, hashes, policy_hash, catalog=None):
+            def guard(models, changes):
+                current, current_hashes = evidence_snapshot()
+                if hashlib.sha256(read_bytes(args.policy)).hexdigest() != policy_hash or hashes != current_hashes:
+                    raise SyncError("Policy or evidence changed during planning")
+                for profile in changes.values():
+                    if profile is not None:
+                        check_profile_quality(models, policy, profile, current, catalog_payload=catalog)
+            return guard
+
         if args.command == "status":
             state_path = args.state_dir / "state.json"
             state = read_json(state_path) if state_path.exists() else {"managed": {}, "history": []}
@@ -37,7 +60,13 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "rollback":
             if not args.apply:
                 raise SyncError("rollback requires --apply")
-            print(json.dumps({"status": mutate(args.models, args.state_dir, rollback=True)}))
+            def rollback_guard(models, changes):
+                policy = read_json(args.policy)
+                _, hashes = evidence_snapshot()
+                guard = guard_for(policy, hashes, hashlib.sha256(read_bytes(args.policy)).hexdigest(),
+                                  read_json(args.catalog_file) if args.catalog_file else None)
+                guard(models, changes)
+            print(json.dumps({"status": mutate(args.models, args.state_dir, rollback=True, quality_guard=rollback_guard)}))
             return 0
         original = read_bytes(args.models)
         models = decode_yaml(original.decode("utf-8"))
@@ -53,6 +82,9 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         policy = read_json(args.policy)
         validate_policy(policy)
+        if not quality.validate_policy(policy["quality"]):
+            print(json.dumps({"status": "policy_unconfigured", "inference_calls": 0, "models_changed": False}))
+            return 0 if args.command == "plan" else 2
         if bool(args.tasks_file) != bool(args.catalog_file):
             raise SyncError("--tasks-file and --catalog-file must be supplied together")
         if args.spend_snapshot and not args.tasks_file:
@@ -68,7 +100,9 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps({"as_of": ranking["as_of"], "metric": ranking["metric"],
                               "tags": sorted(ranking["tasks"]), "attribution": ranking["attribution"]}))
             return 0
-        profile, report = build_profile(models, policy, ranking, catalog)
+        rows, hashes = evidence_snapshot()
+        policy_hash = hashlib.sha256(read_bytes(args.policy)).hexdigest()
+        profile, report = build_profile(models, policy, ranking, catalog, rows, bootstrap=args.bootstrap)
         report["cache_used"] = cache_used
         report["source_mode"] = "operator_snapshot" if args.tasks_file else "official_data_api"
         report["status"] = "planned"
@@ -76,7 +110,8 @@ def main(argv: list[str] | None = None) -> int:
             if args.tasks_file and not args.allow_snapshot_apply:
                 raise SyncError("Snapshot application requires --allow-snapshot-apply in addition to --apply")
             report["status"] = mutate(args.models, args.state_dir, policy["profile_id"], profile,
-                                      expected_sha=hashlib.sha256(original).hexdigest())
+                                      expected_sha=hashlib.sha256(original).hexdigest(),
+                                      quality_guard=guard_for(policy, hashes, policy_hash, catalog))
         elif args.apply:
             raise SyncError("--apply is valid only for sync and rollback")
         private_dir(args.state_dir)

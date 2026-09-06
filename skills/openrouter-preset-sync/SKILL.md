@@ -20,6 +20,19 @@ No paid-model fallback, new provider, account switch, or prompt upload is part o
 The updater uses GET task classifications and GET model catalog only.
 Do not print environment variables, authentication files, or raw provider configuration.
 
+Policy v2 starts as a non-executable quality draft. Do not apply until the operator
+has explicitly configured quality thresholds and fresh confirmation evidence exists
+for all five roles and every fallback. Cold start also requires `--bootstrap`.
+Popularity only discovers candidates; unknown quality means retain/block, never promote.
+
+The separately invoked `python3 -m gjc_preset_sync.evaluate prepare|run` is not part
+of normal synchronization. Never run it from a plan, sync, installation or timer.
+First reuse exact-condition evidence; shortlist, screen and confirm only needed roles.
+New runs require explicit manifest-bound approval and persistent launch/time/candidate
+quotas. Screening cannot authorize promotion. No live execution, charge, provider
+change, or default selection is authorized by invoking this skill. Consult the Korean
+guide for approval fields and sandbox prerequisites. Launch quotas are not monetary caps.
+
 ## Procedure
 
 1. Inspect `gjc-preset-sync status` and the non-secret policy at

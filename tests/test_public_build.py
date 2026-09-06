@@ -25,7 +25,9 @@ class PublicBuildTests(unittest.TestCase):
 
     def test_allowlist_excludes_private_and_unlisted_files(self):
         marker = b"PRIVATE_FIXTURE_" + b"NOT_FOR_RELEASE"
-        for name in (".env", "models.yml", "state/cache.json", ".git/config", "site/notes.txt"):
+        for name in (".env", "models.yml", "state/cache.json", ".git/config", "site/notes.txt",
+                     "evaluation-state/quota.json", "evaluation-state/evidence/private.json",
+                     "approval.local.json", ".gjc/ledger.jsonl"):
             path = self.root / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(marker)

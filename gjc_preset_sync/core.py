@@ -11,7 +11,7 @@ import math
 import os
 from pathlib import Path
 import re
-import stat
+
 import tempfile
 import time
 import urllib.error
@@ -20,6 +20,8 @@ import uuid
 from typing import Any, Iterator
 
 import yaml
+
+from . import quality
 
 VERSION = "0.1.0"
 MAX_BYTES = 8 * 1024 * 1024
@@ -281,8 +283,12 @@ def local_model(selector: str, models: dict) -> tuple[str, dict, str | None]:
 
 
 def validate_policy(policy: dict) -> None:
-    if policy.get("version") != 1:
-        raise SyncError("Policy version must be 1")
+    if policy.get("version") != 2:
+        raise SyncError("Policy version 1 is unsupported; create a version 2 draft with init-policy --policy <new-path>")
+    try:
+        quality.validate_policy(policy.get("quality"))
+    except quality.QualityError as error:
+        raise SyncError(str(error)) from None
     name = policy.get("profile_id")
     if not isinstance(name, str) or not re.fullmatch(r"or-[a-z0-9][a-z0-9._-]{0,59}", name):
         raise SyncError("Managed profile_id must begin with or- and use safe lowercase characters")
@@ -350,16 +356,84 @@ def eligible(remote: dict, local: dict, filters: dict) -> bool:
     return True
 
 
-def build_profile(models: dict, policy: dict, ranking: dict, catalog_payload: dict) -> tuple[dict, dict]:
-    validate_policy(policy)
+def catalog_models(catalog_payload: dict) -> dict:
     rows = catalog_payload.get("data")
     if not isinstance(rows, list) or not rows:
         raise SyncError("Model catalog is empty or malformed")
-    remote_by_id = {}
+    result = {}
     for row in rows:
-        if not isinstance(row, dict) or not valid_selector(row.get("id")) or row["id"] in remote_by_id:
+        if not isinstance(row, dict) or not valid_selector(row.get("id")) or row["id"] in result:
             raise SyncError("Invalid/duplicate catalog model ID")
-        remote_by_id[row["id"]] = row
+        result[row["id"]] = row
+    return result
+
+
+def resolve_remote_id(base: str, local: dict, policy: dict, catalog: dict | None) -> str:
+    explicit = policy.get("aliases", {}).get(base)
+    if catalog is None:
+        if explicit or valid_selector(local["id"]):
+            return explicit or local["id"]
+        raise SyncError("Exact short model mapping requires a catalog or explicit alias")
+    matches = [mid for mid in catalog if mid == explicit] if explicit else [
+        mid for mid in catalog if mid == local["id"] or mid.split("/", 1)[1] == local["id"]]
+    if len(matches) != 1:
+        raise SyncError("Model mapping is missing or ambiguous")
+    return matches[0]
+
+
+def evaluation_shortlist(models: dict, policy: dict, ranking: dict, catalog_payload: dict) -> dict:
+    """Discovery only: bounded compatible candidates, never evaluation or promotion."""
+    validate_policy(policy)
+    if not quality.validate_policy(policy["quality"]):
+        return {role: [] for role in ROLES}
+    by_id = catalog_models(catalog_payload)
+    result = {}
+    for role, spec in policy["roles"].items():
+        weights = {tag: max([w for p, w in spec["tasks"].items() if fnmatch.fnmatchcase(tag, p)] or [0])
+                   for tag in ranking["tasks"]}
+        total = sum(weights.values())
+        candidates = []
+        for index, selector in enumerate(policy["allowed_selectors"]):
+            try:
+                base, local, effort = local_model(selector, models)
+            except SyncError:
+                continue
+            try:
+                mid = resolve_remote_id(base, local, policy, by_id)
+            except SyncError:
+                continue
+            if not eligible(by_id[mid], local, policy.get("filters", {})):
+                continue
+            requested = spec.get("effort") or effort
+            thinking = local.get("thinking") or {}
+            levels = thinking.get("levels")
+            if not levels and thinking.get("minLevel") in EFFORTS and thinking.get("maxLevel") in EFFORTS:
+                levels = EFFORTS[EFFORTS.index(thinking["minLevel"]):EFFORTS.index(thinking["maxLevel"]) + 1]
+            if not requested or not levels or requested not in levels:
+                continue
+            score = sum(ranking["tasks"][tag].get(mid, 0) * weight for tag, weight in weights.items()) / total if total else 0
+            if score > 0:
+                candidates.append({"selector": base + ":" + requested, "remote_id": mid, "share": score, "order": index})
+        candidates.sort(key=lambda c: (-c["share"], c["order"]))
+        seen, unique = set(), []
+        for candidate in candidates:
+            if candidate["selector"] not in seen:
+                unique.append(candidate)
+                seen.add(candidate["selector"])
+        result[role] = unique[:policy["quality"]["roles"][role]["shortlist"]]
+    return result
+
+
+def build_profile(models: dict, policy: dict, ranking: dict, catalog_payload: dict,
+                  evidence: list[dict] = (), *, bootstrap: bool = False,
+                  allow_test: bool = False) -> tuple[dict, dict]:
+    validate_policy(policy)
+    if not quality.validate_policy(policy["quality"]):
+        raise SyncError("policy_unconfigured; explicitly configure quality thresholds and evaluation limits")
+    incumbent_mapping = ((models.get("profiles") or {}).get(policy["profile_id"]) or {}).get("model_mapping", {})
+    if not incumbent_mapping and not bootstrap:
+        raise SyncError("Cold start requires explicit --bootstrap and confirmation evidence for all five roles")
+    remote_by_id = catalog_models(catalog_payload)
     candidates, rejected = [], []
     for position, selector in enumerate(policy["allowed_selectors"]):
         try:
@@ -367,16 +441,11 @@ def build_profile(models: dict, policy: dict, ranking: dict, catalog_payload: di
         except SyncError:
             rejected.append({"selector": selector, "reason": "not_registered"})
             continue
-        explicit = policy.get("aliases", {}).get(base)
-        if explicit:
-            matches = [explicit] if explicit in remote_by_id else []
-        else:
-            local_id = local["id"]
-            matches = [mid for mid in remote_by_id if mid == local_id or mid.split("/", 1)[1] == local_id]
-        if len(matches) != 1:
+        try:
+            mid = resolve_remote_id(base, local, policy, remote_by_id)
+        except SyncError:
             rejected.append({"selector": selector, "reason": "unmapped_or_ambiguous"})
             continue
-        mid = matches[0]
         if not eligible(remote_by_id[mid], local, policy.get("filters", {})):
             rejected.append({"selector": selector, "reason": "capability_or_reference_price_filter"})
             continue
@@ -391,12 +460,9 @@ def build_profile(models: dict, policy: dict, ranking: dict, catalog_payload: di
             raise SyncError(f"No observed task tag matched role {role}; refusing a partial preset")
         total_weight = sum(weights.values())
         scored = []
-        seen = set()
         for candidate in candidates:
             mid = candidate["model_id"]
             score = sum(ranking["tasks"][tag].get(mid, 0) * w for tag, w in weights.items()) / total_weight
-            if score <= 0:
-                continue
             selector = candidate["selector"]
             effort = spec.get("effort")
             if effort:
@@ -407,15 +473,52 @@ def build_profile(models: dict, policy: dict, ranking: dict, catalog_payload: di
                 if not levels or effort not in levels:
                     continue  # Unknown effort capabilities are not guessed.
                 selector = candidate["base"] + ":" + effort
-            if candidate["base"] not in seen:
-                scored.append({"selector": selector, "openrouter_id": mid, "score": score, "order": candidate["order"]})
-                seen.add(candidate["base"])
-        scored.sort(key=lambda c: (-c["score"], c["order"]))
+            pinned_effort = effort or candidate["effort"]
+            if not pinned_effort:
+                continue
+            try:
+                binding = quality.expected_binding(models, policy["quality"], role, selector,
+                            candidate["base"], mid, pinned_effort)
+            except quality.QualityError:
+                continue
+            spec_quality = policy["quality"]["roles"][role]
+            matching = [row for row in evidence if row.get("binding") == binding]
+            matching.sort(key=lambda row: row.get("started_at", ""), reverse=True)
+            # Latest whole run, not the best score selected from prior attempts.
+            observation = matching[0] if matching else None
+            verdict = quality.assess(observation, binding, spec_quality, allow_test=allow_test)
+            if verdict["verdict"] != "PASS":
+                continue
+            scored.append({"selector": selector, "base": candidate["base"], "openrouter_id": mid, "score": score,
+                               "order": candidate["order"], "quality_rate": verdict["rate"],
+                               "evidence": observation})
+        scored.sort(key=lambda c: (-c["quality_rate"], -c["score"], c["order"]))
         if not scored:
             raise SyncError(f"No eligible ranked model for role {role}; retaining installed preset")
-        selected = scored[:spec.get("top_k", 3)]
+        old = incumbent_mapping.get(role, [])
+        old = old if isinstance(old, list) else [old]
+        by_selector = {c["selector"]: c for c in scored}
+        incumbent = by_selector.get(old[0]) if old else None
+        if not incumbent and not bootstrap:
+            raise SyncError("Incumbent confirmation is missing or invalid; retaining the entire preset")
+        if incumbent:
+            primary = next((c for c in scored if c["selector"] != incumbent["selector"]
+                            and quality.paired(c["evidence"], incumbent["evidence"], spec_quality,
+                                               allow_test=allow_test)), incumbent)
+            selected = [primary] + [c for c in scored if c is not primary and
+                        (c["selector"] in old or quality.paired(c["evidence"], primary["evidence"],
+                         spec_quality, fallback=True, allow_test=allow_test))]
+        else:
+            selected = scored
+        unique, seen = [], set()
+        for candidate in selected:
+            if candidate["base"] not in seen:
+                unique.append(candidate)
+                seen.add(candidate["base"])
+        selected = unique[:spec.get("top_k", 3)]
         role_mapping[role] = [c["selector"] for c in selected]
-        report_roles[role] = {"task_weights": weights, "candidates": scored, "selected": role_mapping[role]}
+        report_roles[role] = {"task_weights": weights, "candidates": [
+            {k: v for k, v in c.items() if k != "evidence"} for c in scored], "selected": role_mapping[role]}
     # No provider is made a hard credential prerequisite: GJC resolves the explicit fallback pins.
     profile = {"required_providers": [], "display_name": policy["profile_id"], "model_mapping": role_mapping}
     report = {"profile_id": policy["profile_id"], "metric": ranking["metric"], "as_of": ranking["as_of"],
@@ -428,6 +531,34 @@ def build_profile(models: dict, policy: dict, ranking: dict, catalog_payload: di
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         raise SyncError("HTTP redirect refused; credentials were not forwarded")
+
+
+def check_profile_quality(models: dict, policy: dict, profile: dict, evidence: list[dict],
+                          *, allow_test: bool = False, catalog_payload: dict | None = None) -> None:
+    """Absolute all-chain gate used inside the models transaction lock."""
+    validate_policy(policy)
+    if not quality.validate_policy(policy["quality"]):
+        raise SyncError("policy_unconfigured")
+    mapping = profile.get("model_mapping", {})
+    if set(mapping) != set(ROLES):
+        raise SyncError("Quality gate requires all five roles")
+    for role, chain in mapping.items():
+        if not isinstance(chain, list) or not chain:
+            raise SyncError("Quality gate requires nonempty explicit chains")
+        for selector in chain:
+            base, local, effort = local_model(selector, models)
+            if not effort:
+                raise SyncError("Quality gate requires explicit effort")
+            remote = resolve_remote_id(base, local, policy, catalog_models(catalog_payload) if catalog_payload else None)
+            try:
+                binding = quality.expected_binding(models, policy["quality"], role, selector, base, remote, effort)
+            except quality.QualityError as error:
+                raise SyncError(str(error)) from None
+            matches = sorted([e for e in evidence if e.get("binding") == binding],
+                             key=lambda e: e.get("started_at", ""), reverse=True)
+            if not matches or quality.assess(matches[0], binding, policy["quality"]["roles"][role],
+                                             allow_test=allow_test)["verdict"] != "PASS":
+                raise SyncError("Quality confirmation missing, expired or failed; no profile written")
 
 
 def fetch_json(which: str, api_key: str | None = None) -> dict:
@@ -511,7 +642,8 @@ def recover(models_path: Path, state_dir: Path) -> None:
 
 
 def mutate(models_path: Path, state_dir: Path, profile_id: str | None = None,
-           profile: dict | None = None, rollback: bool = False, expected_sha: str | None = None) -> str:
+           profile: dict | None = None, rollback: bool = False, expected_sha: str | None = None,
+           quality_guard=None) -> str:
     private_dir(state_dir)
     with gjc_lock(models_path):
         recover(models_path, state_dir)
@@ -547,6 +679,10 @@ def mutate(models_path: Path, state_dir: Path, profile_id: str | None = None,
             next_managed = {**state["managed"], **changes}
             next_history = (state["history"] + [{"before": before, "previous_managed": state["managed"]}])[-10:]
         before = _current_subset(models, changes)
+        if any(value is not None for value in changes.values()):
+            if quality_guard is None:
+                raise SyncError("Applying or restoring profiles requires a fresh quality guard")
+            quality_guard(models, changes)
         replacement = patch_profiles(text, changes).encode()
         next_state = {"models_path": str(models_path.absolute()), "managed": next_managed, "history": next_history}
         backups = state_dir / "backups"
@@ -591,7 +727,7 @@ def initial_policy(models: dict) -> dict:
         "architect": {"code:*": 1},
         "critic": {"code:debugging": 1},
     }
-    return {"version": 1, "profile_id": "or-auto", "metric": "request_share", "cache_hours": 6,
+    return {"version": 2, "quality": {"status": "draft"}, "profile_id": "or-auto", "metric": "request_share", "cache_hours": 6,
             "max_age_hours": 72, "allowed_selectors": selectors, "aliases": {},
             "filters": {"require_tools": True, "min_context": 32768},
             "roles": {r: {"tasks": t, "top_k": 3} for r, t in role_tasks.items()}}

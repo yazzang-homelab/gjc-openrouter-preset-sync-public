@@ -25,7 +25,7 @@
 <div class="hero-copy">
 <p class="eyebrow"><span class="dot"></span> CODE-BASED SYSTEM GUIDE</p>
 <h1>점유율을 읽고,<br><span>프리셋은 명시적으로.</span></h1>
-<p class="lead">OpenRouter가 공개하는 작업별 7일 모델 점유율을 읽어<br class="desktop"> 이미 등록·허용된 로컬 모델과 정확하게 연결하고,<br class="desktop"> 역할별 가중평균으로 GJC 사용자 프리셋 후보를 정렬합니다.</p>
+<p class="lead">OpenRouter의 작업별 점유율로 후보를 찾고,<br class="desktop"> 같은 실행 조건의 품질 증거를 재사용하여<br class="desktop"> 다섯 역할의 검증된 프리셋만 명시적으로 적용합니다.</p>
 <div class="hero-actions"><a class="button primary" href="#flow">흐름 살펴보기 <span>↓</span></a><a class="button secondary" href="#demo">계산 방식 데모</a></div>
 <p class="hero-note">소스에 정의된 구조를 설명하는 정적 페이지입니다. 실제 API에 접속하지 않으며 키를 입력받지 않습니다.</p>
 </div>
@@ -37,14 +37,14 @@
 <div class="connector">↓</div>
 <div class="map-gate"><span>도구 지원</span><b>·</b><span>컨텍스트</span><b>·</b><span>참조 가격</span></div>
 <div class="connector">↓</div>
-<div class="map-node purple"><span class="node-icon">03</span><div><strong>역할별 가중평균</strong><small>default · executor · planner · architect · critic</small></div></div>
+<div class="map-node purple"><span class="node-icon">03</span><div><strong>역할별 품질 증거 검사</strong><small>전역할 · primary와 모든 fallback · 유효 증거 재사용</small></div></div>
 <div class="connector">↓</div>
 <div class="map-node"><span class="node-icon">04</span><div><strong>미리보기 → 명시 적용</strong><small><code>--apply</code>가 있을 때만 도구 소유 프로필 기록</small></div></div>
 <div class="return-loop"><span>어떤 역할이든 유효한 후보가 없으면 전체 갱신을 중단합니다.</span></div>
 </div>
 </div>
 <div class="wrap principles">
-<div><span>01 / READ-ONLY DATA</span><strong>읽기 전용 데이터 API, 추론 호출 0회</strong></div>
+<div><span>01 / READ-ONLY SYNC</span><strong>동기화는 추론 0회, 평가기는 별도 승인</strong></div>
 <div><span>02 / EXACT IDENTITY</span><strong>유사 이름 추측 없이 정확한 모델만 연결</strong></div>
 <div><span>03 / EXPLICIT APPLY</span><strong>미리보기가 기본, 적용은 명시 옵션</strong></div>
 </div>
@@ -101,10 +101,10 @@
 <article class="panel" id="f4">
 <p class="panel-kicker">STEP 04 / WEIGHTED AVERAGE</p>
 <h3>역할마다 작업 가중치로 평균을 냅니다.</h3>
-<p>정책은 GJC의 다섯 역할(default, executor, planner, architect, critic)마다 작업 태그 패턴과 양의 가중치를 정합니다. 후보 점수는 매칭된 작업들에서의 점유율을 가중치로 평균한 값입니다. 공개 상위 목록 밖은 0으로 취급하고, 관측된 양의 점유율이 없는 모델은 후보에서 제외합니다.</p>
+<p>가중 점유율은 새 후보를 소수로 추리는 지표입니다. 실제 적용은 역할별 본평가 증거를 별도로 검사하며, 유효한 기존 모델의 증거는 재사용합니다. 새 모델이 나왔다고 전체 평가를 다시 실행하지 않습니다.</p>
 <dl>
 <div><dt>입력</dt><dd>조건을 통과한 후보 · 역할별 작업 가중치 · 작업별 점유율 표</dd></div>
-<div><dt>처리</dt><dd>가중평균 계산 · 점수 내림차순, 동점은 허용 목록 순서 · 같은 로컬 모델의 effort 변형 중복 제거 · top_k(1–8) 절단</dd></div>
+<div><dt>처리</dt><dd>유효 증거 재사용 · 별도 승인 아래 선별/본평가 · 기간별 실행 예산 제한 · 본평가 우선, 점유율은 동점 처리 · incumbent 비교 · 전체 chain 검사</dd></div>
 <div><dt>출력</dt><dd>역할별 primary/fallback 배열</dd></div>
 </dl>
 <div class="boundary"><strong>해석 경계</strong><p>점유율 가중평균은 인기 지표이지 품질 지표가 아닙니다. 어떤 역할이든 매칭 태그가 없거나 후보가 비면 부분 업데이트 없이 전체 갱신을 중단합니다.</p></div>
@@ -153,7 +153,7 @@
 
 <section class="section wrap" id="demo">
 <div class="section-heading">
-<div><p class="eyebrow">HOW THE SCORE IS FORMED</p><h2>가중평균 계산 방식 데모</h2><p>가상 모델 Alpha와 Beta의 가상 점유율로 계산 절차만 보여 줍니다. 실측 데이터, 추천, 현재 순위가 아닙니다.</p></div>
+<div><p class="eyebrow">HOW THE SCORE IS FORMED</p><h2>가중평균 계산 방식 데모</h2><p>가상 점유율로 후보 탐색 계산만 보여 줍니다. 품질 검사·승격 결과, 실측 데이터, 추천, 현재 순위가 아닙니다. 별도 평가기의 실행·시간 제한도 금액 상한을 보장하지 않습니다.</p></div>
 <span class="section-index">03 — DEMO</span>
 </div>
 <div class="demo-layout">

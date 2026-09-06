@@ -13,6 +13,7 @@ import urllib.error
 
 from gjc_preset_sync import core as c
 from gjc_preset_sync.__main__ import main
+from eval_helpers import configure, evidence_rows
 
 
 def fixture():
@@ -22,6 +23,7 @@ def fixture():
     ]}}, "profiles": {"mine": {"required_providers": ["local"], "model_mapping": {
         "default": ["local/alpha:high", "local/beta:high"]}}}}
     policy = c.initial_policy(models)
+    configure(models, policy)
     catalog = {"data": [{"id": f"vendor/{name}", "context_length": 100000,
                          "supported_parameters": ["tools"], "pricing": {"prompt": "0.000001", "completion": "0.000002"}}
                         for name in ("alpha", "beta")]}
@@ -38,7 +40,8 @@ class RankingTests(unittest.TestCase):
         self.models, self.policy, self.catalog, self.data = fixture()
 
     def build(self):
-        return c.build_profile(self.models, self.policy, c.normalize_tasks(self.data, "request_share"), self.catalog)
+        return c.build_profile(self.models, self.policy, c.normalize_tasks(self.data, "request_share"), self.catalog,
+                               evidence_rows(self.models, self.policy), bootstrap=True, allow_test=True)
 
     def test_rank_and_preserve_exact_transport_selector(self):
         profile, report = self.build()
@@ -47,7 +50,8 @@ class RankingTests(unittest.TestCase):
         self.assertEqual(report["inference_calls"], 0)
 
     def test_token_metric_is_distinct(self):
-        profile, _ = c.build_profile(self.models, self.policy, c.normalize_tasks(self.data, "token_share"), self.catalog)
+        profile, _ = c.build_profile(self.models, self.policy, c.normalize_tasks(self.data, "token_share"), self.catalog,
+                                     evidence_rows(self.models, self.policy), bootstrap=True, allow_test=True)
         self.assertEqual(profile["model_mapping"]["default"][0], "local/alpha:high")
 
     def test_never_label_usage_as_spend(self):
@@ -167,7 +171,9 @@ class MutationTests(unittest.TestCase):
         self.profile = {"required_providers": [], "model_mapping": {"default": ["local/beta:high"]}}
 
     def apply(self):
-        return c.mutate(self.path, self.state, "or-auto", self.profile)
+        def guard(models, changes):
+            self.assertEqual(changes, {"or-auto": self.profile})
+        return c.mutate(self.path, self.state, "or-auto", self.profile, quality_guard=guard)
 
     def test_preserve_unrelated_sections_byte_for_byte(self):
         self.apply()
@@ -317,14 +323,23 @@ class NetworkAndCliTests(unittest.TestCase):
             original = (root / "models.yml").read_bytes()
             args = ["--models", str(root / "models.yml"), "--policy", str(root / "policy.json"),
                     "--state-dir", str(root / "state"), "--tasks-file", str(root / "tasks.json"),
-                    "--catalog-file", str(root / "catalog.json")]
+                    "--catalog-file", str(root / "catalog.json"), "--bootstrap"]
+            c.atomic_write(root / "policy.json", c.json_bytes(policy))
+            directory = root / "state/evaluation-state/evidence"
+            c.private_dir(directory)
+            for index, row in enumerate(evidence_rows(models, policy, provenance="live")):
+                c.atomic_write(directory / f"{index}.json", c.json_bytes(row))
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(main(["plan"] + args), 0)
                 self.assertEqual(main(["sync", "--apply"] + args), 2)
                 self.assertEqual((root / "models.yml").read_bytes(), original)
                 self.assertEqual(main(["sync", "--apply", "--allow-snapshot-apply"] + args), 0)
+                with patch("subprocess.Popen", side_effect=AssertionError("Synchronization must never launch an evaluator")):
+                    for _ in range(3):
+                        self.assertEqual(main(["sync", "--apply", "--allow-snapshot-apply"] + args), 0)
                 self.assertEqual(main(["rollback", "--apply", "--models", str(root / "models.yml"),
-                                       "--state-dir", str(root / "state")]), 0)
+                                       "--state-dir", str(root / "state"), "--policy", str(root / "missing-policy.json"),
+                                       "--catalog-file", str(root / "catalog.json")]), 0)
 
     def test_cache_hit_avoids_network(self):
         with tempfile.TemporaryDirectory() as tmp:

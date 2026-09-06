@@ -27,3 +27,7 @@ backups/
 *.bak
 *.pem
 *.key
+.gjc/
+evaluation-state/
+approval*.json
+manifest.local.json

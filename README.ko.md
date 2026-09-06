@@ -13,6 +13,8 @@ GET 작업별 7일 점유율 + GET 모델 카탈로그
   → 실제 models.yml에 등록된 허용 모델과 정확하게 연결
   → 도구·컨텍스트·참조 가격 조건 검사
   → 역할별 가중 점유율로 후보 정렬
+  → 유효한 역할별 품질 증거 재사용·비교 (없으면 기존 프리셋 유지)
+  → 다섯 역할과 모든 primary/fallback의 본평가 통과 확인
   → profiles.or-auto.model_mapping 갱신
 ```
 
@@ -79,6 +81,11 @@ GJC의 사용자 스킬 탐색이 활성화된 **새 세션**에서 `/skill:open
 
 ## 첫 갱신
 
+v2 정책의 `init-policy` 결과는 `quality: {status: draft}`인 **비실행 초안**입니다.
+v1은 거부하며 새 경로의 정책을 작성해야 합니다. `plan`은 초안에서 `policy_unconfigured`를
+보고하고 `sync --apply`는 차단합니다. 사용자 품질 기준과 증거를 준비한 뒤에만 갱신합니다.
+최초 기준 설정에는 `sync --apply --bootstrap`이 추가로 필요하며 품질 검사를 생략하지 않습니다.
+
 `init-policy`는 현재 사용자 프리셋에서 **이미 참조 중이고 등록도 확인되는 selector만** 정책에 복사합니다.
 인증 파일이나 키를 읽지 않습니다. 기존 정책이 있으면 덮어쓰지 않습니다.
 
@@ -96,6 +103,8 @@ gjc --mpreset or-auto
 실행 중인 세션의 모델은 바꾸지 않습니다. 이 도구는 `--default`를 호출하지 않습니다.
 
 ## 자동 갱신
+
+타이머는 평가기를 절대 실행하지 않습니다. 증거가 만료되거나 부족하면 현재 프리셋을 보존합니다.
 
 설치기는 systemd **user** unit 파일만 설치합니다. 자동 활성화하지 않습니다.
 정상적인 실데이터 `plan`/`sync --apply` 후, 타이머가 쓸 키는
@@ -117,6 +126,63 @@ GitHub Actions는 테스트용이며 사용자 컴퓨터의 models.yml을 수정
 
 ## 정책
 
+### 반복 평가 비용과 품질 증거
+
+새 모델 출시는 평가 실행권한이 아닙니다. 등록·허용·능력 조건을 통과한 역할별 소수 후보만
+대상이 됩니다. 같은 연결·모델·요청 effort·GJC 실행파일·과제·채점·격리 조건의 유효한
+관측은 재사용합니다. 정책 문턱만 바뀌면 모델 호출 없이 재판정하지만 수집시각은 갱신하지 않습니다.
+유효 FAIL도 재사용하며 실패 과제만 재시도하여 성공 결과로 교체하지 않습니다.
+
+별도 CLI는 `python3 -m gjc_preset_sync.evaluate prepare|run --manifest <private.json>
+--policy <policy.json> --models <models.yml> --output <private-dir>`입니다.
+이 모듈 명령은 공개 소스 디렉터리 또는 패키지를 설치한 Python 환경에서 실행하십시오.
+파일 복사 설치기만 사용한 경우에는 해당 설치의 Python과
+`PYTHONPATH="$HOME/.local/share/gjc-preset-sync"`를 함께 지정하십시오.
+`prepare`는 실행·승인 소비 없이 재사용 여부, 필요한 실행 수, 잔여 기간 예산을 보고합니다.
+신규 `run`에만 `--approval <private-approval.json>`이 필요합니다. 승인 파일은 소유자 전용
+0600이어야 하며 실제 호출과 비용은 운영자가 별도로 승인해야 합니다.
+
+- 역할별 1개 선별 과제와 별도 본평가를 사용합니다. 선별 FAIL/UNKNOWN이면 본평가 0회입니다.
+- 본평가는 executor 2, critic 3, default 2, planner 2, architect 2개입니다. 모두 기계 채점이며
+  작은 artifact 과제의 범위만 측정합니다. 일반 역할 능력이나 tool-use 품질을 보장하지 않습니다.
+- 후보의 대상 역할만 평가하고 비교 가능한 incumbent와 나머지 역할의 유효 증거는 재사용합니다.
+- 기간별 GJC 프로세스 실행 수·신규 후보 수·예약 시간과 cooldown을 명시해야 합니다.
+  새 승인·run ID·재시작으로 사용량을 초기화하지 않습니다. 불명확한 중단은 보수적으로 소비합니다.
+- 제한은 GJC launch 기준이지 내부 HTTP 요청 수나 금액 hardcap이 아닙니다. 선택적인 USD
+  관측비용 soft-stop도 누락된 사용량·진행 중 청구 때문에 실제 금액 상한을 보장하지 않습니다.
+- 증거는 `~/.local/state/gjc-preset-sync/evaluation-state`에 저장합니다. 승인 파일로 상태 경로를
+  바꿀 수 없습니다. `sync --evidence-dir`는 기존 증거의 읽기 경로만 지정하며 평가하지 않습니다.
+
+`quality` 설정에는 `required_identity_level: gjc_reported`, `runtime_hash`, `runtime_version`, `harness_hash`,
+`connections[정확한 provider/model]`의 `revision/config_hash`, `quota`와 다섯 `roles`가 필요합니다.
+역할별 필수 항목은 `coverage`, `suite_hash`, `scorer_hash`, `conditions_hash`, `confirm_cases`, `screen_cases`, `shortlist`,
+`min_cases`, `max_failures`, `max_timeouts`, `min_pass_rate`, `evidence_ttl_hours`,
+`max_pair_gap_hours`, `paired_rule`의 `min_improvement/max_failure_increase/fallback_degradation`입니다.
+quota 필수 항목은 `period_seconds`, `max_launches_per_period`, `max_new_candidates_per_period`,
+`max_reserved_wall_seconds_per_period`, `reevaluation_cooldown_seconds`입니다.
+모든 값을 명시하면 configured로 판정하지만 통계적으로 검증된 문턱이라는 뜻은 아닙니다.
+
+manifest에는 `version: 1`, 고유 `run_id`, `role`, `stage: screen|confirm`, 정확한 `selector`와
+`remote_id`, `binding`, 전체 `cases`, `limits`, `run_timeout_seconds`, `runtime_path`, `agent_dir`,
+읽기 전용 원천의 `discovery_tasks/discovery_catalog`가 필요합니다. `binding`은
+`quality.expected_binding()`, 과제 집합과 버전은 `eval_suite.cases()/suite_hash()/scorer_hash()`로
+도출하십시오. `limits`는 `timeout_seconds/memory_bytes/cpu_seconds/processes/file_bytes/output_bytes`입니다.
+`conditions_hash`는 `evaluate.execution_conditions(limits, run_timeout_seconds)`, `harness_hash`는
+`quality.harness_hash()`로 도출합니다. 실행기·파서·격리 구현이나 run 시간 제한 변경도 기존 관측을
+무효화하지만 자동 재평가를 시작하지는 않습니다. 실제 키나 운영 데이터를 공개 예제에 복사하지 마십시오.
+
+승인에는 `version: 1`, `approval_id`, 전체 manifest의 `manifest_sha256`, `selector`,
+`connection_revision`, `role`, `stage`, `max_launches`, `case_timeout_seconds`, `run_timeout_seconds`,
+시간대가 있는 `valid_until`, `approved: true`, `acknowledge_no_monetary_cap: true`를 명시합니다.
+선택 항목 `observed_cost_soft_stop`은 `{currency: USD, amount: 양수}`입니다.
+
+Live 환경은 bubblewrap와 hash로 고정한 독립 실행형 GJC 바이너리가 필요합니다. 해시만 고정한
+셸 래퍼는 실제 런타임을 결속하지 못하므로 거부합니다. 별도로 준비한 연결 디렉터리에는
+정확히 한 provider/model의 `models.yml`과 선택적 `auth.json`만 허용합니다. 운영 HOME이나
+설정 전체를 복사하지 않으며 grader는 네트워크가 없는 별도 격리에서 실행합니다.
+provider 네트워크의 목적지 제한은 운영 환경에서 담당해야 하며 bubblewrap 자체는 목적지
+allowlist가 아닙니다. 격리가 불가능하면 live 실행을 거부하고 테스트용 실행으로 대체하지 않습니다.
+
 `~/.config/gjc-preset-sync/policy.json`에서 설정합니다. 실제 사용자 정책은 저장소에 넣지 않습니다.
 
 | 항목 | 의미 |
@@ -135,8 +201,9 @@ GitHub Actions는 테스트용이며 사용자 컴퓨터의 models.yml을 수정
 | `cache_hours` / `max_age_hours` | 기본 캐시 6시간 / 원본 날짜 최대 72시간 |
 
 가격은 실제 로컬 구독 과금이나 잔여 쿼타가 아닙니다. 출력 가격만으로 요청 총비용도 보장하지 않습니다.
-역할별 후보 점수는 매칭된 작업들에서의 점유율 가중평균입니다. 공개 top-N 밖은 0으로 취급하고
-관측된 양의 점유율이 없는 모델은 후보에서 제외합니다. 상위 모델의 품질 우월성을 주장하지 않습니다.
+역할별 discovery 점수는 점유율 가중평균입니다. 신규 평가 shortlist는 양의 점유율이 있어야 합니다.
+품질을 통과한 적용 후보는 본평가 통과율을 우선하며 점유율은 동점 처리에만 사용합니다.
+유효 incumbent는 인기 top-N 밖이어도 유지합니다. 상위 인기 모델의 품질 우월성을 주장하지 않습니다.
 
 초기 역할 정책은 default=agent+코드 생성, executor=코드 생성, planner=agent,
 architect=code 전체, critic=debugging입니다. 이는 로컬 정책이며 공식 분류기의 역할 판정이 아닙니다.
@@ -157,6 +224,8 @@ systemctl --user disable --now gjc-preset-sync.timer
 ```
 
 관리 프리셋만 되돌립니다. 이후 변경된 다른 프리셋이나 provider를 옛 백업으로 덮어쓰지 않습니다.
+복원하는 프리셋도 현재 품질 검사를 통과해야 합니다. 짧은 모델 ID를 별칭 없이 매핑한 경우에는
+`rollback --apply --catalog-file <catalog.json>`으로 정확한 카탈로그도 제공하십시오.
 다른 프로세스가 관리 프리셋을 수동 수정했으면 중단합니다.
 상태/백업은 `~/.local/state/gjc-preset-sync`에 디렉터리 0700, 파일 0600으로 저장하며 최근 10개를 보관합니다.
 전체 models.yml 백업에는 기존 비밀 값이 포함될 수 있으므로 외부 공유/커밋하지 마세요.
