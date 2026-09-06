@@ -6,6 +6,30 @@
 
 언어: [English](README.md) · **한국어** (이 문서)
 
+## 시작
+
+대상 컴퓨터의 터미널에 접근할 수 있는 코딩 에이전트에 이 한 줄을 붙여 넣으세요.
+
+```text
+https://github.com/yazzang-homelab/gjc-openrouter-preset-sync-public 이 저장소의 README를 읽고 설치해 줘.
+```
+
+이 한 줄로 설치와 정책 초안 생성까지 준비합니다. 유료 평가, 프로필 적용, 기본 모델 변경, 타이머 활성화는
+각각 사용자의 별도 명시적 승인이 필요합니다.
+
+<details>
+<summary>에이전트가 할 일(절차)</summary>
+
+1. 플랫폼(Linux 권장)과 GJC에 등록된 모델을 참조하는 사용자 프로필이 있는지 확인한다.
+2. 격리된 venv를 만들고 `pip install .` 후 그 인터프리터로 기존 `scripts/install.py`를 실행한다.
+3. 정책이 없고 등록된 모델이 있으면 `~/.local/bin/gjc-preset-sync init-policy`를 실행한다. 기존 정책은 덮어쓰지 않는다.
+4. 설치 내용, 초안 생성 또는 기존 정책 보존 여부, 부족한 전제를 보고한다. 평가나 프로필 변경은 실행하지 않는다.
+
+</details>
+
+<details>
+<summary>수동 설치와 상세 안내</summary>
+
 ## 빠른 시작
 
 요구 사항: Python 3.10 이상, PyYAML 6.0.2 이상 7 미만, 등록된 모델을 이미 참조하는 사용자 프로필이
@@ -329,6 +353,8 @@ ZIP 내부에도 원본 파일의 `SHA256SUMS`가 들어 있습니다. 체크섬
 - GJC profile schema: https://github.com/Yeachan-Heo/gajae-code/blob/main/packages/coding-agent/src/config/models-config-schema.ts
 
 공개 데이터는 OpenRouter에 출처를 표시해야 합니다. 갱신 보고서는 원본 날짜와 CC BY 4.0 표시를 보존합니다.
+
+</details>
 
 ## 배포물과 라이선스
 

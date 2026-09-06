@@ -6,6 +6,30 @@
 
 Languages: **English** (this file) · [한국어](README.ko.md)
 
+## Start
+
+Paste this one line into a coding agent that has terminal access on the target machine:
+
+```text
+Install https://github.com/yazzang-homelab/gjc-openrouter-preset-sync-public following its README.
+```
+
+This covers installation and a draft policy only. Paid evaluation, profile application,
+default-model changes, and timer activation each need your separate, explicit approval.
+
+<details>
+<summary>What the agent should do (procedure)</summary>
+
+1. Check the platform (Linux recommended) and that GJC has a user profile referencing registered models.
+2. Create an isolated venv, `pip install .`, then run the existing `scripts/install.py` with that interpreter.
+3. If no policy exists and registered models are found, run `~/.local/bin/gjc-preset-sync init-policy`; never overwrite an existing policy.
+4. Report what was installed, whether a draft was created or an existing policy was preserved, and any missing prerequisite. Stop before evaluation or profile changes.
+
+</details>
+
+<details>
+<summary>Manual setup and reference</summary>
+
 ## Quickstart
 
 Requirements: Python >= 3.10, PyYAML >= 6.0.2 and < 7, a [GJC](https://github.com/Yeachan-Heo/gajae-code)
@@ -355,6 +379,8 @@ identity, not publisher identity; the build does not publish anything.
 - Public task-spend page: https://openrouter.ai/rankings#task-spend
 - GJC model profiles / fallback arrays: https://github.com/Yeachan-Heo/gajae-code/blob/main/docs/models.md
 - GJC profile schema: https://github.com/Yeachan-Heo/gajae-code/blob/main/packages/coding-agent/src/config/models-config-schema.ts
+
+</details>
 
 </details>
 
