@@ -203,7 +203,7 @@ h1{font-size:38px}
 .panel{padding:27px}
 .cards{gap:12px}
 .card{padding:23px 20px}
-.demo-layout{grid-template-columns:1fr}
+.demo-layout{grid-template-columns:minmax(0,1fr)}
 .boundary-grid{gap:30px}
 .disclosure{gap:30px;padding:30px}
 }

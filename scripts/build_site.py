@@ -10,6 +10,7 @@ PUBLIC_FILES = (
     ".github/workflows/ci.yml",
     ".gitignore",
     "AGENTS.md",
+    "LICENSE",
     "README.md",
     "README.ko.md",
     "examples/spend-snapshot.schema-example.json",

@@ -1,12 +1,89 @@
 # GJC OpenRouter Preset Sync
 
-OpenRouter의 작업별 모델 점유율을 읽어 **GJC의 사용자 모델 프리셋**을 갱신하는 스킬/CLI입니다.
-GJC 본체나 서명된 공식 preset registry를 수정하지 않습니다.
+- **문제:** 모델 목록을 수동 편집하지 않고 GJC 모델 프리셋을 최신으로 유지합니다.
+- **입력:** OpenRouter 사용량 데이터, 이미 등록한 모델, 기계 채점된 품질 증거.
+- **출력:** 다섯 역할의 primary/fallback 프로필. 미리보기가 기본이고 요청할 때만 적용합니다.
 
-이 공개용 사본에는 소스와 가상 테스트 예제만 포함합니다. 사용자 설정·자격증명·운영 보고서·
-비공개 Git 이력은 포함하지 않습니다. 소프트웨어 라이선스는 아직 지정되지 않았으며,
-공개 열람 자체가 별도의 사용·수정·재배포 라이선스를 부여하지는 않습니다.
-아래 CC BY 4.0 표시는 OpenRouter 데이터의 출처 표기이며 소프트웨어 라이선스와는 별개입니다.
+언어: [English](README.md) · **한국어** (이 문서)
+
+## 빠른 시작
+
+요구 사항: Python 3.10 이상, PyYAML 6.0.2 이상 7 미만, 등록된 모델을 이미 참조하는 사용자 프로필이
+하나 이상 있는 [GJC](https://github.com/Yeachan-Heo/gajae-code) 설치([GJC model profiles](https://github.com/Yeachan-Heo/gajae-code/blob/main/docs/models.md) 참조),
+Linux(동기화는 권장, 평가기는 `fcntl`/`getuid`/bubblewrap 때문에 필수).
+systemd는 선택적인 Linux 스케줄러이며 의존성이 아닙니다.
+
+```bash
+git clone https://github.com/yazzang-homelab/gjc-openrouter-preset-sync-public.git
+cd gjc-openrouter-preset-sync-public
+python3 -m venv .venv
+.venv/bin/pip install .
+.venv/bin/python scripts/install.py
+~/.local/bin/gjc-preset-sync --help
+~/.local/bin/gjc-preset-sync init-policy
+```
+
+일어난 일과 일어나지 않은 일:
+
+- 설치기는 CLI 래퍼를 `~/.local/bin/gjc-preset-sync`에, 패키지와 이 문서를 `~/.local/share/gjc-preset-sync`에,
+  스킬을 `<agent-dir>/skills/openrouter-preset-sync/SKILL.md`에, systemd **user** unit 파일 두 개를 복사했습니다.
+  의존성 설치, 데이터 조회, 프리셋 변경, 타이머 활성화는 하지 않았습니다.
+- 래퍼는 `install.py`를 실행한 Python을 사용합니다. 가상환경을 삭제하지 마세요.
+- `GJC_CODING_AGENT_DIR` 또는 `install.py --agent-dir`로 GJC 사용자 디렉터리(기본 `~/.gjc/agent`)를 지정합니다.
+  사용자 스킬 탐색이 활성화된 **새 세션**에서 `/skill:openrouter-preset-sync`로 호출합니다.
+- `init-policy`는 `~/.config/gjc-preset-sync/policy.json`을 만들며, 기존 프로필이 **이미 참조하고 등록도 확인되는**
+  selector만 복사합니다. 인증 파일을 읽지 않고 기존 정책을 덮어쓰지 않습니다.
+
+**설치 성공은 적용 가능 상태가 아닙니다.** 생성된 정책은 `"quality": {"status": "draft"}`인 비실행 초안입니다.
+아래 두 단계를 마치기 전까지 `plan`은 `policy_unconfigured`를 보고하고 `sync --apply`는 차단됩니다.
+
+### 1단계 — 품질 설정
+
+`~/.config/gjc-preset-sync/policy.json`의 `quality`를 아래 [정책](#정책)의 필수 필드 전체로 채웁니다.
+일부만 채우면 검증기가 거부합니다. 설정 generator는 없으며 hash 필드는 같은 절의 도출 함수로 계산합니다.
+모든 값을 명시하면 configured로 판정하지만 통계적으로 검증된 문턱이라는 뜻은 아닙니다.
+
+### 2단계 — 확인 증거 생성
+
+인기는 후보를 발견할 뿐이며 다섯 역할과 모든 primary/fallback에 유효한 확인 증거가 있어야 승격됩니다.
+평가는 별도 CLI이며 `plan`/`sync`/설치기/타이머가 시작하지 않습니다.
+
+```bash
+.venv/bin/python -m gjc_preset_sync.evaluate prepare \
+  --manifest /private/manifest.json --policy ~/.config/gjc-preset-sync/policy.json \
+  --models ~/.gjc/agent/models.yml --output /private/eval-out
+```
+
+`prepare`는 모델을 실행하지 않고 재사용 여부·필요 실행 수·잔여 기간 예산을 보고합니다.
+패키지가 설치된 인터프리터(위의 `.venv/bin/python`)로 실행하십시오. 별도로 가상환경을 활성화하지 않았다면 `python3`은 다른 인터프리터를 가리킬 수 있습니다.
+실제 실행이 필요하고 비용을 수용한다면 `--approval /private/approval.json`을 추가한 `run`을 사용합니다.
+manifest/승인 필드와 격리 전제는 아래 [정책](#정책) 절에 있습니다.
+
+### 3단계 — 미리보기 후 명시적 적용
+
+현재 셸에 `OPENROUTER_API_KEY`를 설정한 상태에서:
+
+```bash
+~/.local/bin/gjc-preset-sync tasks
+~/.local/bin/gjc-preset-sync plan
+```
+
+`tasks`는 실제 관측 태그를, `plan`은 기록할 예정인 프로필을 보여 줍니다. 둘 다 `models.yml`을 바꾸지 않습니다.
+결과가 기대와 맞을 때만:
+
+```bash
+~/.local/bin/gjc-preset-sync sync --apply
+~/.local/bin/gjc-preset-sync status
+gjc --mpreset or-auto
+```
+
+관리 프로필이 아직 없는 최초 적용에는 `--bootstrap`이 추가로 필요하며 품질 검사를 생략하지 않습니다.
+`sync --apply`는 관리 `or-*` 프로필만 기록하고 `config.yml`, 기존 기본 선택, 실행 중인 세션은 바꾸지 않습니다.
+한 역할이라도 확인된 후보가 비면 부분 업데이트 없이 기존 프로필 전체를 유지합니다.
+
+문제 해결 표는 [영문 README의 Troubleshooting](README.md#troubleshooting)을 참조하십시오.
+
+## 동작 개요
 
 ```text
 GET 작업별 7일 점유율 + GET 모델 카탈로그
@@ -32,6 +109,7 @@ GET 작업별 7일 점유율 + GET 모델 카탈로그
 ## 실제 연동 지점
 
 GJC의 사용자 `profiles` 및 `model_mapping` 형식을 대상으로 합니다.
+GJC 본체나 서명된 공식 preset registry는 수정하지 않습니다.
 연동 스키마는 아래 공식 근거의 `models-config-schema.ts`를 참조하십시오.
 다른 GJC 버전과의 호환성은 해당 버전의 스키마로 확인해야 합니다.
 
@@ -53,54 +131,14 @@ profiles:
 GJC가 명시된 각 selector의 실제 가용성/인증을 실행 시 해석합니다.
 후보 배열은 GJC 자체의 primary/fallback 기능을 사용합니다. 새 API 제공자를 생성하지 않습니다.
 
-## 설치
+## 설치 세부 사항
 
-Python 3.10 이상과 PyYAML 6.0.2 이상(7 미만)이 필요합니다.
-설치기는 의존성 설치, 데이터 조회, 기본 프리셋 변경, 타이머 활성화를 하지 않습니다.
+설치기는 PyYAML이 없는 Python에서는 중단하며 의존성을 자동 설치하지 않습니다. 시스템 Python에 PyYAML이
+이미 있다면 가상환경 없이 `sh scripts/install.sh`로도 설치할 수 있습니다. 설치 전 `python3 -m unittest discover -s tests -v`로
+오프라인 테스트를 실행할 수 있으나, 테스트 통과가 운영 환경의 설치·실데이터·적용을 의미하지는 않습니다.
 
-공개용 소스를 내려받아 압축을 해제한 뒤, `pyproject.toml`이 있는 디렉터리에서 실행하십시오.
-
-```bash
-python3 -m unittest discover -s tests -v
-sh scripts/install.sh
-~/.local/bin/gjc-preset-sync init-policy
-```
-
-의존성이 없다면 별도 가상환경에 설치한 후 같은 Python으로 설치기를 실행하세요.
-
-```bash
-python3 -m venv .venv
-.venv/bin/pip install .
-.venv/bin/python scripts/install.py
-```
-
-가상환경으로 설치했다면 해당 가상환경을 삭제하지 마세요. 래퍼가 그 Python을 사용합니다.
-`GJC_CODING_AGENT_DIR` 또는 설치기의 `--agent-dir`로 GJC 사용자 디렉터리를 지정할 수 있습니다.
-스킬은 해당 agent 디렉터리의 `skills/openrouter-preset-sync/SKILL.md`에 설치됩니다.
-GJC의 사용자 스킬 탐색이 활성화된 **새 세션**에서 `/skill:openrouter-preset-sync`를 호출합니다.
-
-## 첫 갱신
-
-v2 정책의 `init-policy` 결과는 `quality: {status: draft}`인 **비실행 초안**입니다.
-v1은 거부하며 새 경로의 정책을 작성해야 합니다. `plan`은 초안에서 `policy_unconfigured`를
-보고하고 `sync --apply`는 차단합니다. 사용자 품질 기준과 증거를 준비한 뒤에만 갱신합니다.
-최초 기준 설정에는 `sync --apply --bootstrap`이 추가로 필요하며 품질 검사를 생략하지 않습니다.
-
-`init-policy`는 현재 사용자 프리셋에서 **이미 참조 중이고 등록도 확인되는 selector만** 정책에 복사합니다.
-인증 파일이나 키를 읽지 않습니다. 기존 정책이 있으면 덮어쓰지 않습니다.
-
-현재 셸에 `OPENROUTER_API_KEY`를 안전하게 설정한 상태에서:
-
-```bash
-~/.local/bin/gjc-preset-sync plan
-~/.local/bin/gjc-preset-sync sync --apply
-~/.local/bin/gjc-preset-sync status
-gjc --mpreset or-auto
-```
-
-`plan`과 `sync`의 기본 동작은 models.yml을 바꾸지 않는 미리보기입니다.
-`sync --apply`만 관리 프리셋을 기록합니다. `config.yml`, 기존 기본 선택,
-실행 중인 세션의 모델은 바꾸지 않습니다. 이 도구는 `--default`를 호출하지 않습니다.
+v2 정책만 허용하며 v1은 거부합니다. `init-policy` 초안은 `quality: {status: draft}`이고, `plan`은 초안에서
+`policy_unconfigured`를 보고하며 `sync --apply`는 종료 코드 2로 차단합니다. 이 도구는 `gjc --default`를 호출하지 않습니다.
 
 ## 자동 갱신
 
@@ -133,9 +171,9 @@ GitHub Actions는 테스트용이며 사용자 컴퓨터의 models.yml을 수정
 관측은 재사용합니다. 정책 문턱만 바뀌면 모델 호출 없이 재판정하지만 수집시각은 갱신하지 않습니다.
 유효 FAIL도 재사용하며 실패 과제만 재시도하여 성공 결과로 교체하지 않습니다.
 
-별도 CLI는 `python3 -m gjc_preset_sync.evaluate prepare|run --manifest <private.json>
+별도 CLI는 `.venv/bin/python -m gjc_preset_sync.evaluate prepare|run --manifest <private.json>
 --policy <policy.json> --models <models.yml> --output <private-dir>`입니다.
-이 모듈 명령은 공개 소스 디렉터리 또는 패키지를 설치한 Python 환경에서 실행하십시오.
+이 모듈 명령은 패키지를 설치한 Python 환경(위 가상환경) 또는 공개 소스 디렉터리에서 실행하십시오.
 파일 복사 설치기만 사용한 경우에는 해당 설치의 Python과
 `PYTHONPATH="$HOME/.local/share/gjc-preset-sync"`를 함께 지정하십시오.
 `prepare`는 실행·승인 소비 없이 재사용 여부, 필요한 실행 수, 잔여 기간 예산을 보고합니다.
@@ -165,7 +203,8 @@ quota 필수 항목은 `period_seconds`, `max_launches_per_period`, `max_new_can
 manifest에는 `version: 1`, 고유 `run_id`, `role`, `stage: screen|confirm`, 정확한 `selector`와
 `remote_id`, `binding`, 전체 `cases`, `limits`, `run_timeout_seconds`, `runtime_path`, `agent_dir`,
 읽기 전용 원천의 `discovery_tasks/discovery_catalog`가 필요합니다. `binding`은
-`quality.expected_binding()`, 과제 집합과 버전은 `eval_suite.cases()/suite_hash()/scorer_hash()`로
+`quality.expected_binding(models, policy["quality"], role, selector, base, remote_id, effort, stage)`,
+과제 집합과 버전은 `eval_suite.cases(role, stage)`, `eval_suite.suite_hash()`, `eval_suite.scorer_hash()`로
 도출하십시오. `limits`는 `timeout_seconds/memory_bytes/cpu_seconds/processes/file_bytes/output_bytes`입니다.
 `conditions_hash`는 `evaluate.execution_conditions(limits, run_timeout_seconds)`, `harness_hash`는
 `quality.harness_hash()`로 도출합니다. 실행기·파서·격리 구현이나 run 시간 제한 변경도 기존 관측을
@@ -175,6 +214,8 @@ manifest에는 `version: 1`, 고유 `run_id`, `role`, `stage: screen|confirm`, �
 `connection_revision`, `role`, `stage`, `max_launches`, `case_timeout_seconds`, `run_timeout_seconds`,
 시간대가 있는 `valid_until`, `approved: true`, `acknowledge_no_monetary_cap: true`를 명시합니다.
 선택 항목 `observed_cost_soft_stop`은 `{currency: USD, amount: 양수}`입니다.
+연결의 `config_hash`는 `quality.config_hash(models, provider, model)`, `manifest_sha256`은
+`quality.sha(manifest)`로 계산합니다. 후자는 들여쓴 파일 바이트가 아닌 정규화된 JSON을 해시합니다.
 
 Live 환경은 bubblewrap와 hash로 고정한 독립 실행형 GJC 바이너리가 필요합니다. 해시만 고정한
 셸 래퍼는 실제 런타임을 결속하지 못하므로 거부합니다. 별도로 준비한 연결 디렉터리에는
@@ -288,3 +329,12 @@ ZIP 내부에도 원본 파일의 `SHA256SUMS`가 들어 있습니다. 체크섬
 - GJC profile schema: https://github.com/Yeachan-Heo/gajae-code/blob/main/packages/coding-agent/src/config/models-config-schema.ts
 
 공개 데이터는 OpenRouter에 출처를 표시해야 합니다. 갱신 보고서는 원본 날짜와 CC BY 4.0 표시를 보존합니다.
+
+## 배포물과 라이선스
+
+이 공개용 사본에는 소스와 가상 테스트 예제만 포함합니다. 사용자 설정·자격증명·운영 보고서·
+비공개 Git 이력은 포함하지 않습니다.
+
+- **소프트웨어:** MIT License — [LICENSE](LICENSE) 참조.
+- **데이터:** 실행 시 소비하는 OpenRouter 데이터셋은 OpenRouter가 CC BY 4.0으로 제공합니다. 생성 보고서는
+  원본 날짜와 출처 표기를 보존합니다. 이 표기는 데이터에 대한 것이며 이 코드의 라이선스가 아닙니다.

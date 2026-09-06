@@ -42,7 +42,8 @@ def main():
     shutil.copytree(repo / "gjc_preset_sync", share / "gjc_preset_sync", dirs_exist_ok=True,
                     ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     shutil.copy2(repo / "skills/openrouter-preset-sync/SKILL.md", skill / "SKILL.md")
-    shutil.copy2(repo / "README.ko.md", share / "README.ko.md")
+    for doc in ("README.md", "README.ko.md", "LICENSE"):
+        shutil.copy2(repo / doc, share / doc)
     wrapper.write_text("#!/bin/sh\n# owner: " + OWNER + "\n" +
                        "export PYTHONPATH=" + shlex.quote(str(share)) + "\n" +
                        "exec " + shlex.quote(sys.executable) + ' -m gjc_preset_sync "$@"\n')

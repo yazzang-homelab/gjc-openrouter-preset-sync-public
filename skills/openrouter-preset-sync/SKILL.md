@@ -1,10 +1,13 @@
 ---
 name: openrouter-preset-sync
 description: >
-  OpenRouter 작업별 모델 점유율을 GJC model preset으로 갱신한다.
-  "프리셋 자동 업데이트", "OpenRouter 순위 반영", "gjc preset sync",
-  "모델 후보 재정렬", "/skill:openrouter-preset-sync" 요청에 사용한다.
-  추론 API를 호출하지 않으며 기존 기본 모델과 사용자 프리셋을 임의로 변경하지 않는다.
+  Update a tool-owned GJC model profile (primary/fallback lists) from OpenRouter's
+  public per-task model-share dataset, gated by the operator's quality policy and
+  confirmation evidence. Use for requests such as "update model preset",
+  "sync OpenRouter ranking", "gjc preset sync", "reorder model candidates",
+  "프리셋 자동 업데이트", "OpenRouter 순위 반영", "모델 후보 재정렬", or
+  "/skill:openrouter-preset-sync". Makes no inference calls and never changes the
+  default model or user-owned profiles.
 ---
 
 # OpenRouter preset sync
@@ -13,7 +16,9 @@ description: >
 
 Use the installed `~/.local/bin/gjc-preset-sync` CLI. This file is a procedure,
 not a grant to spend money, read arbitrary credentials, or change defaults.
-Read `~/.local/share/gjc-preset-sync/README.ko.md` for installation and policy details.
+For installation, quality configuration, evaluation, and troubleshooting read
+`~/.local/share/gjc-preset-sync/README.md` (English); the Korean guide is
+`~/.local/share/gjc-preset-sync/README.ko.md`.
 
 **Do not call chat/completions for classification, not even max_tokens=1.**
 No paid-model fallback, new provider, account switch, or prompt upload is part of this skill.
@@ -30,8 +35,9 @@ of normal synchronization. Never run it from a plan, sync, installation or timer
 First reuse exact-condition evidence; shortlist, screen and confirm only needed roles.
 New runs require explicit manifest-bound approval and persistent launch/time/candidate
 quotas. Screening cannot authorize promotion. No live execution, charge, provider
-change, or default selection is authorized by invoking this skill. Consult the Korean
-guide for approval fields and sandbox prerequisites. Launch quotas are not monetary caps.
+change, or default selection is authorized by invoking this skill. Consult the README's
+"Advanced details" for approval fields and sandbox prerequisites. Launch quotas are not
+monetary caps.
 
 ## Procedure
 

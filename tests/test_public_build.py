@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import json
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 import zipfile
@@ -61,6 +64,31 @@ class PublicBuildTests(unittest.TestCase):
             builder.build(self.root)
         self.assertFalse((self.root / "dist").exists())
 
+    def test_license_and_readmes_ship_verbatim_in_source_zip(self):
+        self.assertIn("LICENSE", builder.PUBLIC_FILES)
+        output = builder.build(self.root)
+        with zipfile.ZipFile(output / "source.zip") as archive:
+            self.assertEqual(len(archive.namelist()), len(builder.PUBLIC_FILES) + 1)
+            for name in ("LICENSE", "README.md", "README.ko.md"):
+                self.assertEqual(archive.read(f"{builder.ARCHIVE_ROOT}/{name}"), (REPO / name).read_bytes())
+            license_text = archive.read(f"{builder.ARCHIVE_ROOT}/LICENSE").decode("utf-8")
+        self.assertTrue(license_text.startswith("MIT License\n"))
+        self.assertIn("Copyright (c) 2026 GJC OpenRouter Preset Sync contributors", license_text)
+        self.assertIn("Permission is hereby granted, free of charge", license_text)
+        self.assertIn('THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND', license_text)
+
+    def test_missing_license_fails_before_output(self):
+        (self.root / "LICENSE").unlink()
+        with self.assertRaisesRegex(ValueError, "LICENSE"):
+            builder.build(self.root)
+        self.assertFalse((self.root / "dist").exists())
+
+    def test_pyproject_links_license_file_and_english_readme(self):
+        lines = [line.strip() for line in (REPO / "pyproject.toml").read_text(encoding="utf-8").splitlines()]
+        self.assertIn('license = "MIT"', lines)
+        self.assertIn('license-files = ["LICENSE"]', lines)
+        self.assertIn('readme = "README.md"', lines)
+
     def test_symlink_source_is_rejected(self):
         source = self.root / "site/app.js"
         source.unlink()
@@ -76,6 +104,37 @@ class PublicBuildTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             builder.build(self.root)
         self.assertEqual(list(external.iterdir()), [])
+
+
+class InstallerDistributionTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name) / "home"
+        self.agent = Path(self.temp.name) / "agent"
+        self.home.mkdir()
+        self.agent.mkdir()
+        (self.agent / "models.yml").write_text("untouched: true\n")
+
+    def test_installer_ships_both_readmes_and_license_without_activation(self):
+        completed = subprocess.run(
+            [sys.executable, str(REPO / "scripts/install.py"), "--home", str(self.home), "--agent-dir", str(self.agent)],
+            capture_output=True, text=True, check=True, timeout=60,
+        )
+        report = json.loads(completed.stdout)
+        share = self.home / ".local/share/gjc-preset-sync"
+        for name in ("README.md", "README.ko.md", "LICENSE"):
+            self.assertEqual((share / name).read_bytes(), (REPO / name).read_bytes(), name)
+        self.assertEqual((share / ".installer-owner").read_text().strip(), "gjc-openrouter-preset-sync")
+        self.assertEqual(report["timer_enabled"], False)
+        self.assertEqual(report["models_changed"], False)
+        self.assertEqual(report["network_calls"], 0)
+        self.assertEqual((self.agent / "models.yml").read_text(), "untouched: true\n")
+        unitdir = self.home / ".config/systemd/user"
+        self.assertTrue((unitdir / "gjc-preset-sync.timer").is_file())
+        self.assertFalse((unitdir / "timers.target.wants").exists())
+        self.assertFalse((unitdir / "default.target.wants").exists())
+        self.assertTrue((self.agent / "skills/openrouter-preset-sync/SKILL.md").is_file())
 
 
 if __name__ == "__main__":

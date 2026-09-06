@@ -1,11 +1,14 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "gjc-openrouter-preset-sync"
 version = "0.1.0"
 description = "Quality-gated GJC preset synchronization with separate opt-in evaluation"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 dependencies = ["PyYAML>=6.0.2,<7"]
 
