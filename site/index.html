@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="OpenRouter의 작업별 7일 점유율을 읽어 GJC 사용자 모델 프리셋을 미리보기·명시 적용으로 갱신하는 도구의 구조를 설명하는 정적 안내 페이지입니다.">
+<meta name="color-scheme" content="dark">
+<title>OpenRouter Preset Sync — 점유율에서 프리셋까지</title>
+<link rel="stylesheet" href="./style.css">
+<script src="./app.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#main">본문으로 이동</a>
+<header>
+<nav class="wrap" aria-label="주 메뉴">
+<a class="brand" href="#top"><span class="mark">PS</span> Preset Sync <span class="brand-sub">FOR GJC</span></a>
+<div class="nav-links"><a href="#flow">흐름</a><a href="#distinctions">구분</a><a href="#demo">계산 데모</a><a href="#states">상태</a></div>
+<a class="nav-note" href="#disclosure">공개 범위</a>
+</nav>
+</header>
+
+<main id="main">
+<section class="hero" id="top">
+<div class="wrap hero-inner">
+<div class="hero-copy">
+<p class="eyebrow"><span class="dot"></span> CODE-BASED SYSTEM GUIDE</p>
+<h1>점유율을 읽고,<br><span>프리셋은 명시적으로.</span></h1>
+<p class="lead">OpenRouter가 공개하는 작업별 7일 모델 점유율을 읽어<br class="desktop"> 이미 등록·허용된 로컬 모델과 정확하게 연결하고,<br class="desktop"> 역할별 가중평균으로 GJC 사용자 프리셋 후보를 정렬합니다.</p>
+<div class="hero-actions"><a class="button primary" href="#flow">흐름 살펴보기 <span>↓</span></a><a class="button secondary" href="#demo">계산 방식 데모</a></div>
+<p class="hero-note">소스에 정의된 구조를 설명하는 정적 페이지입니다. 실제 API에 접속하지 않으며 키를 입력받지 않습니다.</p>
+</div>
+<div class="system-map" aria-label="점유율 조회에서 프리셋 적용까지의 단계 구조">
+<div class="map-top"><span class="mini-label">THE SYNC PIPELINE</span><span class="outline-tag">구조도</span></div>
+<div class="map-node"><span class="node-icon">01</span><div><strong>작업별 7일 점유율 조회</strong><small>request 또는 token 점유율 · 모델 카탈로그</small></div></div>
+<div class="connector">↓</div>
+<div class="map-node"><span class="node-icon">02</span><div><strong>정확한 연결</strong><small>이미 등록되고 허용된 로컬 모델만</small></div></div>
+<div class="connector">↓</div>
+<div class="map-gate"><span>도구 지원</span><b>·</b><span>컨텍스트</span><b>·</b><span>참조 가격</span></div>
+<div class="connector">↓</div>
+<div class="map-node purple"><span class="node-icon">03</span><div><strong>역할별 가중평균</strong><small>default · executor · planner · architect · critic</small></div></div>
+<div class="connector">↓</div>
+<div class="map-node"><span class="node-icon">04</span><div><strong>미리보기 → 명시 적용</strong><small><code>--apply</code>가 있을 때만 도구 소유 프로필 기록</small></div></div>
+<div class="return-loop"><span>어떤 역할이든 유효한 후보가 없으면 전체 갱신을 중단합니다.</span></div>
+</div>
+</div>
+<div class="wrap principles">
+<div><span>01 / READ-ONLY DATA</span><strong>읽기 전용 데이터 API, 추론 호출 0회</strong></div>
+<div><span>02 / EXACT IDENTITY</span><strong>유사 이름 추측 없이 정확한 모델만 연결</strong></div>
+<div><span>03 / EXPLICIT APPLY</span><strong>미리보기가 기본, 적용은 명시 옵션</strong></div>
+</div>
+</section>
+
+<section class="section wrap" id="flow">
+<div class="section-heading">
+<div><p class="eyebrow">SHARE → PRESET</p><h2>점유율이 프리셋 후보가 되기까지</h2><p>단계를 선택하면 입력·처리·출력과 중단 경계를 확인할 수 있습니다.</p></div>
+<span class="section-index">01 — FLOW</span>
+</div>
+<div class="flow-layout">
+<div class="step-list" aria-label="갱신 단계">
+<button class="step" data-step="f1" aria-controls="f1"><span>01</span><div><strong>점유율 조회</strong><small>작업별 7일 데이터 · 카탈로그</small></div><b>→</b></button>
+<button class="step" data-step="f2" aria-controls="f2"><span>02</span><div><strong>정확한 연결</strong><small>허용 목록과 로컬 등록 확인</small></div><b>→</b></button>
+<button class="step" data-step="f3" aria-controls="f3"><span>03</span><div><strong>조건 검사</strong><small>도구 · 컨텍스트 · 참조 가격</small></div><b>→</b></button>
+<button class="step" data-step="f4" aria-controls="f4"><span>04</span><div><strong>역할별 가중평균</strong><small>후보 정렬과 top_k 선택</small></div><b>→</b></button>
+<button class="step" data-step="f5" aria-controls="f5"><span>05</span><div><strong>미리보기</strong><small>모델 설정은 변경하지 않음</small></div><b>→</b></button>
+<button class="step" data-step="f6" aria-controls="f6"><span>06</span><div><strong>명시 적용과 롤백</strong><small>도구 소유 프로필만 기록</small></div><b>→</b></button>
+</div>
+<div class="step-panels" aria-live="polite">
+<article class="panel" id="f1">
+<p class="panel-kicker">STEP 01 / FETCH</p>
+<h3>공개된 작업별 점유율만 읽습니다.</h3>
+<p>OpenRouter 공식 Data API의 작업별 분류 결과(7일 창)와 모델 카탈로그를 GET으로 읽습니다. 각 작업의 상위 모델에는 요청 점유율과 토큰 점유율이 함께 제공되며, 이 도구는 기본으로 요청 점유율을 사용합니다.</p>
+<dl>
+<div><dt>입력</dt><dd>작업별 7일 점유율 응답 · 모델 카탈로그 응답</dd></div>
+<div><dt>처리</dt><dd>스키마와 7일 창 확인 · 원본 날짜 유효기간(기본 72시간) 검사 · 점유율 범위 검증</dd></div>
+<div><dt>출력</dt><dd>작업 태그별 모델 점유율 표와 출처 표시 문구</dd></div>
+</dl>
+<div class="boundary"><strong>데이터 경계</strong><p>이 API는 프롬프트를 분류해 주는 API가 아니며, Auto Router 내부 지출 순위를 반환하는 API도 아닙니다. 응답이 오래되었거나 형식이 다르면 갱신을 중단하고 기존 프리셋을 유지합니다.</p></div>
+</article>
+<article class="panel" id="f2">
+<p class="panel-kicker">STEP 02 / EXACT MATCH</p>
+<h3>이미 등록되고 허용된 모델만 연결합니다.</h3>
+<p>정책의 허용 목록에 있는 로컬 selector가 실제 <code>models.yml</code>에 유일하게 등록되어 있는지 먼저 확인합니다. 그 다음 전체 OpenRouter ID가 같거나, 로컬 모델 ID가 vendor를 제거한 OpenRouter ID와 유일하게 일치할 때만 연결을 인정합니다.</p>
+<dl>
+<div><dt>입력</dt><dd>허용 selector 목록 · 로컬 모델 등록 정보 · 카탈로그</dd></div>
+<div><dt>처리</dt><dd>정확한 ID 일치 확인 · 다중 vendor 충돌 시 명시 alias 요구</dd></div>
+<div><dt>출력</dt><dd>연결된 후보 목록과 제외 사유(<code>not_registered</code>, <code>unmapped_or_ambiguous</code>)</dd></div>
+</dl>
+<div class="boundary"><strong>신원 경계</strong><p>유사 이름, 버전 교체, 와이어 호환성을 추측하지 않습니다. 새로 출시된 모델은 카탈로그에 나타나도 로컬 등록·허용 목록에 없으면 자동으로 도입하지 않습니다.</p></div>
+</article>
+<article class="panel" id="f3">
+<p class="panel-kicker">STEP 03 / FILTERS</p>
+<h3>도구, 컨텍스트, 참조 가격을 검사합니다.</h3>
+<p>도구 호출 지원은 OpenRouter의 지원 파라미터와 로컬의 명시적 비호환 설정을 함께 봅니다. 최소 컨텍스트는 카탈로그 값과 로컬 contextWindow가 모두 알려져 있고 충분해야 통과합니다. 참조 가격 상한은 OpenRouter 카탈로그의 입력·출력 단가(USD/백만 토큰)에 적용됩니다.</p>
+<dl>
+<div><dt>입력</dt><dd>후보별 카탈로그 정보 · 로컬 모델 메타데이터 · 정책 filters</dd></div>
+<div><dt>처리</dt><dd>require_tools · min_context · max_prompt_per_million · max_completion_per_million</dd></div>
+<div><dt>출력</dt><dd>조건을 통과한 후보와 제외 사유(<code>capability_or_reference_price_filter</code>)</dd></div>
+</dl>
+<div class="boundary"><strong>가격 경계</strong><p>참조 가격은 실제 로컬 구독 과금이나 잔여 쿼타가 아닙니다. 가격 상한을 설정한 항목의 단가가 알려지지 않으면 해당 후보를 제외합니다.</p></div>
+</article>
+<article class="panel" id="f4">
+<p class="panel-kicker">STEP 04 / WEIGHTED AVERAGE</p>
+<h3>역할마다 작업 가중치로 평균을 냅니다.</h3>
+<p>정책은 GJC의 다섯 역할(default, executor, planner, architect, critic)마다 작업 태그 패턴과 양의 가중치를 정합니다. 후보 점수는 매칭된 작업들에서의 점유율을 가중치로 평균한 값입니다. 공개 상위 목록 밖은 0으로 취급하고, 관측된 양의 점유율이 없는 모델은 후보에서 제외합니다.</p>
+<dl>
+<div><dt>입력</dt><dd>조건을 통과한 후보 · 역할별 작업 가중치 · 작업별 점유율 표</dd></div>
+<div><dt>처리</dt><dd>가중평균 계산 · 점수 내림차순, 동점은 허용 목록 순서 · 같은 로컬 모델의 effort 변형 중복 제거 · top_k(1–8) 절단</dd></div>
+<div><dt>출력</dt><dd>역할별 primary/fallback 배열</dd></div>
+</dl>
+<div class="boundary"><strong>해석 경계</strong><p>점유율 가중평균은 인기 지표이지 품질 지표가 아닙니다. 어떤 역할이든 매칭 태그가 없거나 후보가 비면 부분 업데이트 없이 전체 갱신을 중단합니다.</p></div>
+</article>
+<article class="panel" id="f5">
+<p class="panel-kicker">STEP 05 / PREVIEW</p>
+<h3>미리보기는 모델 설정을 바꾸지 않습니다.</h3>
+<p><code>plan</code>과 <code>sync</code>는 기본적으로 계산 결과와 제외 사유만 보고합니다. 보고서에는 사용한 지표, 원본 날짜, 출처 표시, 역할별 후보 점수, 그리고 추론 호출 수 0이 포함됩니다.</p>
+<dl>
+<div><dt>입력</dt><dd>역할별 후보 배열 · 현재 설치된 관리 프리셋</dd></div>
+<div><dt>처리</dt><dd>변경 예정 내용과 제외 사유 정리 · OpenRouter 출처(CC BY 4.0) 표시 보존</dd></div>
+<div><dt>출력</dt><dd>미리보기 보고서 · <code>models.yml</code> 변경 없음</dd></div>
+</dl>
+<div class="boundary"><strong>변경 경계</strong><p>미리보기도 데이터 GET 요청과 비공개 캐시·보고서 파일 기록을 수행할 수 있습니다. 변경하지 않는 대상은 모델 설정이며, 관리 프리셋 반영에는 명시 적용 옵션이 필요합니다.</p></div>
+</article>
+<article class="panel" id="f6">
+<p class="panel-kicker">STEP 06 / APPLY &amp; ROLLBACK</p>
+<h3>명시 적용은 도구 소유 프로필만 기록합니다.</h3>
+<p><code>sync --apply</code>는 정책에 지정된 <code>or-*</code> 이름의 관리 프로필 하나만 기록합니다. GJC의 잠금 규약에 참여하고, 쓰기 직전 원문을 재검사하며, 원자적 교체와 미완료 기록 복구를 사용합니다. <code>rollback --apply</code>는 관리 프로필만 기록된 이전 상태로 되돌립니다.</p>
+<dl>
+<div><dt>입력</dt><dd>미리보기와 동일한 후보 배열 · 명시 적용 옵션</dd></div>
+<div><dt>처리</dt><dd>원본 백업 · 잠금 협력 · profiles 섹션만 재작성 · 나머지 섹션은 바이트 그대로 보존</dd></div>
+<div><dt>출력</dt><dd>갱신된 관리 프로필 하나 · 상태와 백업 기록</dd></div>
+</dl>
+<div class="boundary"><strong>소유 경계</strong><p>관리하지 않는 프로필의 의미와 providers 등 다른 섹션을 보존하며, config.yml·기본 선택·실행 중 세션의 모델은 바꾸지 않습니다. profiles 안의 주석과 서식은 재배치될 수 있습니다. 다른 프로세스가 관리 프로필을 수정했으면 중단합니다. 전체 백업에는 기존 비밀 값이 포함될 수 있으므로 외부에 공유하지 않아야 합니다.</p></div>
+</article>
+</div>
+</div>
+<noscript><p class="notice">JavaScript가 꺼져 있어 모든 단계의 설명을 순서대로 표시합니다.</p></noscript>
+</section>
+
+<section class="section section-tint" id="distinctions">
+<div class="wrap">
+<div class="section-heading">
+<div><p class="eyebrow">WHAT IT IS NOT</p><h2>같아 보이지만 다른 것들</h2><p>이 도구가 주장하지 않는 것을 먼저 구분합니다.</p></div>
+<span class="section-index">02 — DISTINCTIONS</span>
+</div>
+<div class="cards">
+<article class="card"><span class="card-num">A / SHARE ≠ QUALITY</span><h3>점유율은 품질이 아닙니다</h3><p>작업별 점유율은 그 기간에 얼마나 많이 선택되었는지를 나타냅니다. 상위 모델이 더 좋은 답을 낸다는 주장으로 읽지 않습니다.</p><p class="card-foot">보고서에도 벤치마크나 공식 라우터 재현이 아니라고 명시합니다.</p></article>
+<article class="card"><span class="card-num">B / REQUEST · TOKEN ≠ SPEND</span><h3>요청·토큰 점유율은 지출이 아닙니다</h3><p>공식 API가 제공하는 값은 요청 점유율과 토큰 점유율입니다. 이를 지출 점유율로 계산하거나 위장하지 않습니다. 별도로 검증한 지출 스냅샷은 운영자가 명시적으로 가져올 때만 사용합니다.</p><p class="card-foot">지출 데이터의 자동 수집 어댑터는 제공하지 않습니다.</p></article>
+<article class="card featured"><span class="card-num">C / ZERO INFERENCE ≠ FREE</span><h3>추론 호출 0회가 전체 무료를 뜻하지 않습니다</h3><p>갱신 코드는 모델 추론을 호출하지 않습니다. 그러나 데이터 API 호출의 과금 여부를 추정해 무료라고 단정하지 않으며, 생성된 프리셋으로 GJC를 실행하면 기존 연결의 한도·요금·제공자 정책이 그대로 적용됩니다.</p><p class="card-foot">비용에 대한 판단은 운영자의 실제 계약과 계정 기준입니다.</p></article>
+</div>
+<aside class="agent-note"><span class="outline-tag">범위 안내</span><p>이 도구는 GJC 본체나 서명된 공식 preset registry를 수정하지 않습니다. <strong>사용자 <code>models.yml</code>의 도구 소유 <code>profiles</code> 항목 하나만 관리</strong>하며, 새 API 제공자나 인증 저장소를 만들지 않습니다. 데이터 조회에는 운영자가 환경 변수로 제공한 OpenRouter 키를 사용합니다. 이 소개 페이지는 키를 읽거나 입력받지 않습니다.</p></aside>
+</div>
+</section>
+
+<section class="section wrap" id="demo">
+<div class="section-heading">
+<div><p class="eyebrow">HOW THE SCORE IS FORMED</p><h2>가중평균 계산 방식 데모</h2><p>가상 모델 Alpha와 Beta의 가상 점유율로 계산 절차만 보여 줍니다. 실측 데이터, 추천, 현재 순위가 아닙니다.</p></div>
+<span class="section-index">03 — DEMO</span>
+</div>
+<div class="demo-layout">
+<form class="demo-controls" id="demo-form" aria-labelledby="demo-controls-title">
+<h3 id="demo-controls-title">역할 정책(가상)</h3>
+<p class="demo-help">한 역할이 두 가상 작업에 부여하는 가중치를 조절합니다. 데모의 0은 해당 작업을 제외한다는 뜻이며, 실제 정책에는 양의 가중치만 허용됩니다. YAML은 한 역할만 발췌한 설명용 예시이고, 실제 정책에는 다섯 역할이 모두 필요합니다.</p>
+<div class="control">
+<label for="w-code">가상 작업 A: <code>code:generation</code> 가중치</label>
+<div class="control-row"><input type="range" id="w-code" name="w-code" min="0" max="5" step="1" value="2" aria-describedby="w-code-out" disabled><output id="w-code-out" for="w-code">2</output></div>
+</div>
+<div class="control">
+<label for="w-agent">가상 작업 B: <code>agent:tool_use</code> 가중치</label>
+<div class="control-row"><input type="range" id="w-agent" name="w-agent" min="0" max="5" step="1" value="1" aria-describedby="w-agent-out" disabled><output id="w-agent-out" for="w-agent">1</output></div>
+</div>
+<fieldset class="control control-checks">
+<legend>조건 검사(가상)</legend>
+<label class="check"><input type="checkbox" id="tools-beta" name="tools-beta" checked disabled> Beta가 도구 호출을 지원함</label>
+<label class="check"><input type="checkbox" id="ctx-alpha" name="ctx-alpha" checked disabled> Alpha의 컨텍스트가 최소 조건을 충족함</label>
+</fieldset>
+<div class="control">
+<label for="top-k">top_k (primary와 fallback을 합친 후보 수)</label>
+<div class="control-row"><input type="range" id="top-k" name="top-k" min="1" max="3" step="1" value="2" aria-describedby="top-k-out" disabled><output id="top-k-out" for="top-k">2</output></div>
+</div>
+<noscript><p class="notice">JavaScript가 꺼져 있어 기본값(A=2, B=1, 모든 조건 통과, top_k=2)으로 계산한 결과를 표시합니다.</p></noscript>
+</form>
+<div class="demo-result">
+<div class="demo-shares">
+<h3>가상 점유율 표</h3>
+<table>
+<caption>작업별 가상 점유율(0~1). 임의로 정한 값이며 어떤 실제 모델과도 무관합니다.</caption>
+<thead><tr><th scope="col">가상 모델</th><th scope="col">작업 A</th><th scope="col">작업 B</th></tr></thead>
+<tbody>
+<tr><th scope="row">local/alpha</th><td>0.32</td><td>0.18</td></tr>
+<tr><th scope="row">local/beta</th><td>0.21</td><td>0.27</td></tr>
+<tr><th scope="row">local/gamma</th><td>0.00</td><td>0.00</td></tr>
+</tbody>
+</table>
+</div>
+<div class="demo-formula"><span class="mini-label">FORMULA</span><code>점수 = Σ(작업 점유율 × 가중치) ÷ Σ(가중치)</code></div>
+<div class="demo-output" id="demo-output" aria-live="polite">
+<h3>계산 결과(가상)</h3>
+<ol class="score-list" id="score-list">
+<li class="score-item selected"><span class="rank">01</span><div><strong>local/alpha</strong><small>(0.32×2 + 0.18×1) ÷ 3 = 0.273</small></div><b>primary</b></li>
+<li class="score-item selected"><span class="rank">02</span><div><strong>local/beta</strong><small>(0.21×2 + 0.27×1) ÷ 3 = 0.230</small></div><b>fallback</b></li>
+<li class="score-item excluded"><span class="rank">—</span><div><strong>local/gamma</strong><small>관측된 양의 점유율이 없어 후보에서 제외</small></div><b>제외</b></li>
+</ol>
+<div class="preview-block">
+<span class="mini-label">PREVIEW (NOT APPLIED)</span>
+<pre id="preview-yaml"><code>profiles:
+  or-demo:
+    required_providers: []
+    display_name: or-demo
+    model_mapping:
+      default: ["local/alpha", "local/beta"]</code></pre>
+</div>
+<p class="demo-status" id="demo-status">설명용 미리보기입니다. 실제 도구도 <code>--apply</code> 없이는 모델 설정을 바꾸지 않지만, 캐시와 보고서는 기록할 수 있습니다.</p>
+</div>
+</div>
+</div>
+<p class="demo-disclaimer">위 수치는 계산 절차를 설명하기 위한 가상 값입니다. 특정 모델의 성능·추천·현재 순위를 나타내지 않으며, 실제 도구는 OpenRouter 데이터의 출처 표시(CC BY 4.0)를 보고서에 보존합니다.</p>
+</section>
+
+<section class="section section-tint" id="states">
+<div class="wrap">
+<div class="section-heading">
+<div><p class="eyebrow">SEPARATE STATES</p><h2>설치했다고 적용된 것은 아닙니다</h2><p>다섯 가지 상태는 서로 독립적이며 각각 따로 확인해야 합니다.</p></div>
+<span class="section-index">04 — STATES</span>
+</div>
+<ol class="state-track">
+<li><span>01</span><strong>설치</strong><p>의존성 설치, 데이터 조회, 기본 프리셋 변경, 타이머 활성화를 하지 않습니다.</p></li>
+<li><span>02</span><strong>실데이터 검증</strong><p>키가 설정된 셸에서 미리보기를 실행해 실제 응답과 연결 결과를 확인합니다.</p></li>
+<li><span>03</span><strong>관리 프리셋 적용</strong><p><code>sync --apply</code>로 도구 소유 프로필 하나만 기록합니다.</p></li>
+<li><span>04</span><strong>기본 선택</strong><p>이 도구는 기본 모델 선택을 바꾸지 않습니다. 사용 여부는 GJC에서 운영자가 직접 결정합니다.</p></li>
+<li><span>05</span><strong>타이머 활성화</strong><p>systemd user unit 파일만 설치되며, 실데이터 검증 후 운영자가 요청할 때 별도로 활성화합니다.</p></li>
+</ol>
+<div class="boundary-grid">
+<div class="boundary-intro"><span class="large-symbol">↳</span><h3>유효한 후보가 없으면<br>갱신하지 않습니다.</h3><p>개별 모델의 연결·조건 검사 실패는 해당 후보의 제외로 처리합니다. 어떤 역할이든 후보가 비거나 데이터가 오래되었을 때, 잠금 충돌·관리 프로필 수정이 확인되었을 때는 전체 갱신을 중단합니다.</p></div>
+<div class="accordions">
+<details><summary>같은 짧은 ID가 여러 vendor에 있으면?<span>+</span></summary><p>연결을 인정하지 않고 <code>unmapped_or_ambiguous</code>로 제외합니다. 정책의 alias에 정확한 OpenRouter ID를 명시해야 합니다.</p></details>
+<details><summary>어떤 역할에 매칭되는 작업 태그가 없으면?<span>+</span></summary><p>부분 프리셋을 만들지 않고 전체 갱신을 중단합니다. 설치된 프리셋은 그대로 남습니다.</p></details>
+<details><summary>원본 날짜가 유효기간을 넘었으면?<span>+</span></summary><p>유효기간을 초과하거나 허용된 미래 시각 오차(1시간)를 넘은 스냅샷은 거부합니다. 기본 유효기간은 72시간이고 기본 캐시는 6시간입니다.</p></details>
+<details><summary>다른 프로세스가 잠금을 잡고 있으면?<span>+</span></summary><p>GJC의 잠금 규약을 따르며 다른 잠금을 임의로 제거하거나 탈취하지 않습니다. 소유 프로세스를 운영자가 확인해야 합니다.</p></details>
+<details><summary>백업에는 무엇이 들어가나?<span>+</span></summary><p>생성 전 원본 <code>models.yml</code> 전체를 소유자 전용 권한으로 보관합니다. 기존 비밀 값이 포함될 수 있으므로 외부 공유나 커밋 대상이 아닙니다.</p></details>
+<details><summary>profiles 섹션의 주석과 서식은 유지되나?<span>+</span></summary><p>profiles 외 섹션은 바이트 그대로 보존합니다. profiles 섹션 안의 주석·서식은 재직렬화로 재배치되거나 사라질 수 있으며, 앵커·별칭·중복 키가 있는 파일은 잘못 수정하지 않도록 거부합니다.</p></details>
+</div>
+</div>
+</div>
+</section>
+
+<section class="section wrap" id="disclosure">
+<div class="disclosure">
+<div>
+<p class="eyebrow">PUBLIC BY DESIGN</p>
+<h2>구조만 공개합니다.<br>운영 데이터는 담지 않습니다.</h2>
+<p>이 페이지는 소스 코드에서 확인한 흐름을 일반화한 정적 안내입니다. OpenRouter나 GJC에 접속하지 않고, 키를 입력받지 않으며, 데모의 모든 수치는 가상 값입니다.</p>
+<p class="source-link"><a class="button secondary" href="./source.zip">공개용 소스 묶음 내려받기</a></p>
+<p class="source-note">개인 정책과 실운영 데이터를 제외한 공개용 사본입니다. 라이선스는 아직 선택되지 않았습니다.</p>
+</div>
+<div class="disclosure-list">
+<div><span>포함</span><p>점유율 조회 · 정확한 연결 · 조건 검사 · 가중평균 · 미리보기와 명시 적용 · 실패 시 유지</p></div>
+<div><span>제외</span><p>실제 정책 파일 · 실제 모델 선택 결과 · 계정과 키 · 운영 로그 · 백업 · 내부 경로와 주소</p></div>
+<div><span>검증 범위</span><p>소스에 정의된 처리 흐름입니다. 현재 운영 상태나 이 도구를 포함한 전체 환경의 보안 완전성을 보증하지 않습니다.</p></div>
+<div><span>공식 근거</span><p><a href="https://openrouter.ai/docs/cookbook/administration/data-api">OpenRouter 작업별 Data API 문서</a> · <a href="https://openrouter.ai/docs/guides/routing/routers/auto-router">Auto Router 안내</a> · <a href="https://openrouter.ai/rankings#task-spend">공개 순위 화면</a>. 공개 데이터는 OpenRouter 출처 표시(CC BY 4.0)를 요구합니다.</p></div>
+</div>
+</div>
+</section>
+</main>
+
+<footer class="wrap">
+<a class="brand" href="#top"><span class="mark">PS</span> Preset Sync</a>
+<p>OpenRouter 점유율 → GJC 사용자 프리셋 · 코드 기반 구조 안내</p>
+<a href="#top">맨 위로 ↑</a>
+</footer>
+</body>
+</html>

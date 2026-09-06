@@ -1,0 +1,12 @@
+# owner: gjc-openrouter-preset-sync
+[Unit]
+Description=Refresh GJC OpenRouter preset every six hours
+
+[Timer]
+OnCalendar=*-*-* 00,06,12,18:17:00 Asia/Seoul
+RandomizedDelaySec=120
+Persistent=true
+Unit=gjc-preset-sync.service
+
+[Install]
+WantedBy=timers.target

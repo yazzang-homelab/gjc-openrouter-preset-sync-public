@@ -1,0 +1,12 @@
+{
+  "_warning": "FICTIONAL schema illustration, not live data; intentionally stale and must not be applied",
+  "as_of": "2000-01-01",
+  "window_days": 7,
+  "metric": "spend_share",
+  "source_url": "https://openrouter.ai/rankings",
+  "tasks": {
+    "code:general_impl": {"example/alpha": 0.4, "example/beta": 0.3},
+    "code:debugging": {"example/alpha": 0.2, "example/beta": 0.5},
+    "agent:web_search": {"example/alpha": 0.3, "example/beta": 0.4}
+  }
+}

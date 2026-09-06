@@ -1,0 +1,13 @@
+# owner: gjc-openrouter-preset-sync
+[Unit]
+Description=Update policy-managed GJC model preset from OpenRouter task data (no inference)
+After=network-online.target
+ConditionPathExists=%h/.config/gjc-preset-sync/policy.json
+
+[Service]
+Type=oneshot
+EnvironmentFile=-%h/.config/gjc-preset-sync/openrouter.env
+ExecStart=%h/.local/bin/gjc-preset-sync sync --apply
+UMask=0077
+NoNewPrivileges=yes
+TimeoutStartSec=180
